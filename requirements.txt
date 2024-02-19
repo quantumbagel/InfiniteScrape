@@ -2,3 +2,6 @@ js2py
 requests
 fake-useragent
 beautifulsoup4
+ndg-httpsclient
+pyopenssl
+pyasn1
