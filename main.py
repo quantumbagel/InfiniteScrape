@@ -15,9 +15,18 @@ calculated_crafts = {}
 requests_total = 0
 
 
-def craft(one, two, proxy):
+def craft(one, two, proxy, timeout=15):
+    """
+    This function, using the proxy IP passed, will attempt to craft two elements together
+    :param one:
+    :param two: The second element to craft
+    :param proxy: The proxy IP
+    :param timeout: The amount of time to wait (maximum)
+    :return: None if the attempt failed, or the JSON if it succeeded.
+    """
     global requests_total
     global proxies
+
     headers = {
         'User-Agent': ua.random,
         'Accept': '*/*',
@@ -29,13 +38,9 @@ def craft(one, two, proxy):
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin',
         'Sec-GPC': '1',
-        "X-Client-IP": "104.22.28.82",  # Cloudflare bypass
+        "X-Client-IP": "104.22.28.82",  # confuse cloudflare a bit
         "X-Originating-IP": "104.22.28.82",
         "X-Remote-IP": "104.22.28.82",
-        # "X-Remote-Addr": "104.22.28.82",
-        # "X-Host": "104.22.28.82",
-        # "X-Forwarded-Host": "127.0.0.1",
-        # "X-Forwarded-For": "104.22.28.82"
     }
 
     params = {
@@ -43,7 +48,7 @@ def craft(one, two, proxy):
         'second': two,
     }
     response = requests.get('https://neal.fun/api/infinite-craft/pair', params=params, headers=headers,
-                            proxies={"https": proxy}, verify=False, timeout=15)
+                            proxies={"https": proxy}, verify=False, timeout=timeout)
     string_response = response.content.decode('utf-8')  # Format byte response
     try:
         json_resp = json.loads(string_response)
@@ -102,11 +107,11 @@ def handle(crafts, identification, proxy, proxy_id_if_different=None):
                 return
             done = True
         calculated_crafts[c[0]+"+"+c[1]] = out
-        if out not in list(base_tree.keys()):
+        if out['result'] not in list(base_tree.keys()):
             print(c, out)
             base_tree.update({out['result']: [[c[0], c[1]]]})
         else:
-            base_tree[out].append([c[0], c[1]])
+            base_tree[out['result']].append([c[0], c[1]])
         save_tree_and_depth()
         proxies[current_proxy]['status'] = 1
         proxies[current_proxy]['total_calls'] += 1
