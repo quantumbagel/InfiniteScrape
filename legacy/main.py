@@ -210,7 +210,6 @@ def worker(crafts, identification, proxy_id=None):
             time.sleep(0.2 - (end - start))
 
 
-
     save()  # When we get out of the loop, save data. TODO: MongoDB support
 
 

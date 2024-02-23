@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore")  # Allow us to hide the "unsafe connection" wi
 logging.basicConfig(level=logging.INFO)
 
 
-def craft(one, two, proxy=None, timeout=15, session=None):
+def craft(one, two, proxy=None, timeout=5, session=None):
     """
     This function, using the proxy IP passed, will attempt to craft two elements together
     :param one:

@@ -1,3 +1,4 @@
+import logging
 import time
 
 # from backend.Worker import Worker
@@ -23,7 +24,7 @@ READ_PENALTY = 60  # 1 minute if we can't read the data
 
 
 class Proxy:
-    def __init__(self, ip: str | None, port: str | int | None, protocol: str, max_workers: int = 3):
+    def __init__(self, ip: str | None, port: str | int | None, protocol: str, log_level: int = logging.INFO):
 
         if protocol not in PROTOCOLS:  # Ensure protocol validity
             raise InvalidProxyProtocol(f"The protocol {protocol} isn't valid! Expected one of: {' ,'.join(PROTOCOLS)}")
@@ -53,8 +54,12 @@ class Proxy:
             self.parsed = None
         else:
             self.parsed = self.protocol + "://" + self.ip + ":" + self.port
+        self.logger = logging.getLogger(f"Proxy({self.parsed})")
+        self.logger.setLevel(log_level)
 
     def submit(self, success: bool, time_elapsed: float | int | None = 0, did_connect: bool = True, did_respond: bool = True, retry_after=0):
+        self.logger.debug(f"Received proxy use submission: success: {success}, time_elapsed: {time_elapsed},"
+                          f" did_connect: {did_connect}, did_respond: {did_respond}, retry_after: {retry_after}")
         if success:
             if self.total_successes == 0:
                 self.average_response = time_elapsed
@@ -81,15 +86,25 @@ class Proxy:
                 self.disabled_until = time.time() + CONNECTION_PENALTY  # Default penalty
 
     def withdraw(self, w):
+        """
+
+        :param w:
+        :return:
+        """
+
         if self.worker == w:
+            self.logger.debug(f"Worker {str(w)} successfully withdrew!")
             self.worker = None
             return True
+        self.logger.debug(f"Worker {str(w)} was unable to withdraw (lock held by worker {self.worker})")
         return False
 
     def grab(self, w):
         if self.worker is None:
+            self.logger.debug(f"Worker {str(w)} successfully connected!")
             self.worker = w
             return True
+        self.logger.debug(f"Worker {str(w)} was unable to connect (lock held by worker {self.worker})")
         return False
 
     def __eq__(self, other):
@@ -102,3 +117,8 @@ class Proxy:
             return "no proxy"
         else:
             return self.parsed
+
+    def __repr__(self):
+        return (f"Proxy({self.__str__()}): average_response: {self.average_response},"
+                f" total_successes: {self.total_successes}, total_submissions: {self.total_submissions},"
+                f" status: {self.status}, disabled_until: {self.disabled_until}")
