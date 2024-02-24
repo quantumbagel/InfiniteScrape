@@ -101,6 +101,7 @@ class Proxy:
                 self.average_response = new_total_seconds / self.total_successes
             # Proxy is now functional :D
             self.status = VALID
+            self.disabled_until = 0
         else:
             # Proxy is not working
             self.status = INVALID
