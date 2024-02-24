@@ -162,6 +162,8 @@ class Worker:
                 # If we are too fast for the rate limit, sleep it off
                 time.sleep(delta)
 
+            batch_number += 1  # Forgot to put this :(
+
         self.logger.info(f"Finished processing of {self.completed} jobs.")
         self.proxy.withdraw(self)  # Give our proxy back
 

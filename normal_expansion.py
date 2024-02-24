@@ -48,6 +48,7 @@ for _ in range(4):
     s.run()
 
     o = parse_crafts_into_tree(s.output_crafts)
+    print(s.progress)
     o_value.append(o)
     for i in o.keys():
         if i.split("`")[0] not in pick_from and i.split('`')[0] != "Nothing":
