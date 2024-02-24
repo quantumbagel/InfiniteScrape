@@ -1,14 +1,13 @@
+import collections
 import logging
-import random
 import warnings
-
 from backend.Proxy import Proxy
 from backend.tools import *
 
 warnings.filterwarnings('ignore')
 logging.basicConfig(level=logging.INFO)
-MAXIMUM_REQUESTS_PER_SECOND = 5
-NEW_PROXY_SLEEP = 10
+MAXIMUM_REQUESTS_PER_SECOND = 5  # The maximum requests per second. Higher values will cause proxies to be ratelimited.
+NEW_PROXY_SLEEP = 10  # The amount of time for the proxy function to sleep after failing to find a new proxy
 
 
 class Worker:
@@ -18,7 +17,6 @@ class Worker:
     Batch processing of crafts
     Auto rescheduling of proxies when they break
 
-
     Scheduler class will be able to add crafts to the Worker when it determines there is rebalancing required
 
     This class will NOT
@@ -26,85 +24,110 @@ class Worker:
     run error checking
     """
 
-    def __init__(self, all_proxies: list, worker_crafts: list, proxy: Proxy, worker_id: str | int,
-                 log_level=logging.INFO):
-        self.kill = False
-        self.thread = ReturnValueThread(target=Worker.run, args=[self])
+    def __init__(self, all_proxies: list, all_crafts: collections.deque, proxy: Proxy, worker_id: str | int,
+                 log_level=logging.INFO, return_craft_reference: list = None):
+        """
+        Initialize the Worker.
+        :param all_proxies: the list of all the available proxies
+        :param all_crafts: the collections.deque of all available crafts that need to be performed
+        :param proxy: The Proxy the worker should start with
+        :param worker_id: the ID of the worker (for log messages)
+        :param log_level: the log level to set the internal logger to.
+        :param return_craft_reference: the reference to the list to put the completed crafts in. If None,
+         data will be stored in self.crafts
+        """
+        if return_craft_reference is None:
+            return_craft_reference = []
+        self.kill = False  # Whether to force quit the worker. Set this externally
+        self.thread = ImprovedThread(target=Worker.run, args=[self])
         self.all_proxies = all_proxies
-        self.worker_crafts = worker_crafts
+        self.all_crafts = all_crafts
         self.proxy = proxy
         self.session = requests.Session()
         self.id = worker_id
         self.logger = logging.getLogger(f"Worker({self.id})")
         self.logger.setLevel(log_level)
-        self.crafts = []
-        self._current_craft_index = 0
-        self.batch_size = 5
+        self.crafts = return_craft_reference
+        self.batch_size = 5  # The maximum number of jobs to concurrently send.
+        self.completed = 0  # Keep track of completed jobs
 
     def begin_working(self):
-        self.thread = ReturnValueThread(target=Worker.run, args=[self])
+        """
+        Start the Worker
+        :return: None
+        """
+        self.thread = ImprovedThread(target=Worker.run, args=[self])
         self.thread.start()
 
     def finish_working(self):
+        """
+        Wait for the Worker to finish. Currently unused
+        :return: False if the Worker isn't running and True if the Worker was running, but finished
+        """
         if self.thread.ident is None:
             return False  # Not started
         self.thread.join()
         return True
 
-    def forfeit_tasks(self, how_many):
-        if not self.is_working():
-            stolen = self.worker_crafts[:how_many+1]
-            self.worker_crafts = self.worker_crafts[how_many+1:]
-            return stolen
-        else:
-            available_to_steal = self.worker_crafts[self._current_craft_index+self.batch_size:]
-            stolen = available_to_steal[:how_many + 1]
-            self.worker_crafts = available_to_steal[how_many + 1:]
-            return stolen
-
     def is_working(self):
+        """
+        Check if the Worker is still alive.
+        :return: Whether the Worker is running.
+        """
         return self.thread.is_alive()
 
     def run(self):
+        """
+        Run the Worker.
+        :return: None
+        """
         s = time.time()
-
-        self._current_craft_index = 0  # Keep track of the current index
-
-        grab_attempt = self.proxy.grab(self)  # Attempt to re
-
-        if not grab_attempt:
+        grab_attempt = self.proxy.grab(self) 
+        if not grab_attempt:  # If we can't get a proxy, this worker can quit (too many workers relative to proxies)
             return
-        while self._current_craft_index < len(self.worker_crafts):
+        
+        batch_number = 1  # The current batch number
+        
+        # Main loop
+        while len(self.all_crafts) > 0:
             batch_start = time.time()
-            if self.kill:
-                return self.worker_crafts[self._current_craft_index:]
+            if self.kill:  # Check for killswitch
+                return
 
-            batch_number = (self._current_craft_index // self.batch_size) + 1  # Current batch number
-            total_batch_number = len(self.worker_crafts) // self.batch_size  # Total batches we have to process
+            batch_crafts = []
+            try:
+                for _ in range(self.batch_size):
+                    batch_crafts.append(self.all_crafts.popleft())
+            except IndexError:
+                self.logger.info("Craft deque is now empty! continuing from here")
 
-            if len(self.worker_crafts) % self.batch_size:  # If there is a remainder, we have to add one.
-                total_batch_number += 1
+            if not len(batch_crafts):  # It was empty from the start
+                return
 
-            self.logger.info(f"Now executing batch {batch_number}/"
-                             f"{total_batch_number} (Current exec time: {round(time.time() - s, 2)}s)")
-            current_crafts = self.worker_crafts[self._current_craft_index:self._current_craft_index + self.batch_size]
+            self.logger.info(f"Now executing batch {batch_number} (Current exec time: {round(time.time() - s, 2)}s)")
             batch_threads = []
-            for index, current_craft in enumerate(current_crafts):
+            for index, current_craft in enumerate(batch_crafts):
                 self.logger.debug(f"Job {index + 1} of batch {batch_number} is starting with craft {current_craft}...")
-                t = ReturnValueThread(target=craft,
-                                      args=[current_craft[0], current_craft[1], self.proxy, 10, self.session])
-                t.start()
+                
+                # Start the craft worker
+                t = ImprovedThread(target=craft,
+                                      args=[current_craft[0], current_craft[1], self.proxy, 10, self.session],
+                                      name=f"{self.id}-Job{index+1}")
+                t.start() 
                 batch_threads.append(t)
-            results = []
-            found_proxy_update = False
-            failed_crafts = []
+            
+            need_new_proxy = False
+            failed_crafts = []  # The crafts that didn't work
             for index, thread in enumerate(batch_threads):
+                if self.kill:
+                    return  # Check for killswitch
                 result: dict = thread.join()
                 self.logger.debug(f"Job {index + 1} of batch {batch_number} returned value: {result}")
                 if result["status"] == "success":
-                    self.crafts.append([current_crafts[index], result])
-                    results.append(result)
+                    self.crafts.append([batch_crafts[index], result])  # Save the craft
+                    self.completed += 1  # Increment the completed metric
                     self.proxy.submit(True, result["time_elapsed"])
+                # Submit metrics to the Proxy object
                 elif result["type"] == "read":
                     self.proxy.submit(False, None, True, False)
                 elif result["type"] == "connection":
@@ -112,98 +135,79 @@ class Worker:
                 elif result["type"] == "ratelimit":
                     self.proxy.submit(False, None, True, False,
                                       retry_after=result["penalty"])
-                if result["status"] != "success":
-                    failed_crafts.append(current_crafts[index])
-                    found_proxy_update = True
 
-            if len(failed_crafts) and found_proxy_update:  # One (or more) crafts failed, and we have a new proxy
-                self.logger.warning(f"{len(failed_crafts)}/{len(current_crafts)} of batch"
+                if result["status"] != "success":
+                    # Add the craft to failed_crafts if it failed
+                    failed_crafts.append(batch_crafts[index])
+                    need_new_proxy = True  # We have to find a new proxy 
+            
+            # Check for failed crafts
+            if need_new_proxy:  # One (or more) crafts failed, and we have a new proxy
+                self.logger.warning(f"{len(failed_crafts)}/{len(batch_crafts)} of batch"
                                     f" {batch_number} failed. (Current proxy: {str(self.proxy)})"
                                     f" Attempting to locate new proxy.")
                 self.proxy.withdraw(self)  # Our proxy doesn't work! Get RID OF IT
                 self.find_new_proxy()  # Get a new proxy. This function returns when it's found one
-                # Needed two lines here because .extend doesn't seem to return anything.
-                # The crafts we haven't seen yet
-                self.worker_crafts = self.worker_crafts[self._current_craft_index + len(current_crafts):]
-                # Add the ones we've seen that just failed
-                self.worker_crafts.extend(failed_crafts)
 
-                self._current_craft_index = 0  # Back to the beginning :( not really tho
-                continue  # Don't need to run rate limit code here.
+                # Add the ones we've seen that just failed back to the deque
+                for item in failed_crafts:
+                    self.all_crafts.append(item)
+
+                continue  # Don't need to run rate limit code here - the penalty will take care of that
 
             time_total: float = time.time() - batch_start
+            delta: float = (len(batch_crafts) / MAXIMUM_REQUESTS_PER_SECOND) - time_total
 
-            delta: float = (len(current_crafts) / MAXIMUM_REQUESTS_PER_SECOND) - time_total
-
-            self._current_craft_index += len(current_crafts)
-
-            if delta > 0 and self._current_craft_index < len(self.worker_crafts):
+            if delta > 0:
                 # If we are too fast for the rate limit, sleep it off
                 time.sleep(delta)
-        self.logger.info(f"Finished processing of {len(self.worker_crafts)} jobs.")
+
+        self.logger.info(f"Finished processing of {self.completed} jobs.")
         self.proxy.withdraw(self)  # Give our proxy back
-        return []
 
     def find_new_proxy(self):
-        grabbed = False
+        """
+        Find a new proxy. This function will run until it finds a new proxy that
+
+        (a) is unchecked, valid, or timed-out invalid
+        (b) is unused
+
+        This function doesn't return anything, it will instead set self.proxy.
+
+        :return: None
+        """
+        grabbed = False  # Have we found a proxy yet?
         while not grabbed:
             for proxy in rank_proxies(self.all_proxies):  # Rank proxies so we start with the BEST ONES FIRST
                 if proxy.disabled_until <= time.time():  # Ready to TRY AGAIN
                     self.logger.debug(f"Attempting to grab suitable proxy {str(proxy)}...")
                     attempt_to_grab = proxy.grab(self)  # Try to connect to the proxy
+
                     if attempt_to_grab:  # WE GOT EM BOIS
                         self.logger.info(f"Found new proxy: {str(proxy)}.")
+
+                        # Update self.proxy
                         grabbed = True
                         self.proxy = proxy
                         break
-                    else:
+                    else:  # Failed to connect to proxy
                         self.logger.debug(f"Failed to grab proxy {str(proxy)}")
 
-            if not grabbed:
-                self.logger.error(
-                    f"Unable to find available, functional proxy! Retrying in {NEW_PROXY_SLEEP} seconds...")
-                time.sleep(NEW_PROXY_SLEEP)  # Keep on fruiting for a proxy ig
-
-        return True
-
-    def update_proxies(self, new_proxies: list[Proxy]):
-        self.all_proxies = new_proxies
-
-    def update_crafts(self, new_crafts: list[tuple[str] | list[str]]):
-        self.worker_crafts = new_crafts
+            # We haven't found a proxy yet, just WAIT for NEW_PROXY_SLEEP seconds
+            self.logger.error(
+                f"Unable to find available, functional proxy! Retrying in {NEW_PROXY_SLEEP} seconds...")
+            time.sleep(NEW_PROXY_SLEEP)  # Keep on fruiting for a proxy ig
 
     def __str__(self):
+        """
+        Represent the Worker as a string
+        :return:
+        """
         return self.id
 
     def __repr__(self):
+        """
+        Represent the Worker.
+        :return:
+        """
         return f"Worker({self.id})"
-
-
-if __name__ == "__main__":  # A short test of Worker (you can mess around with it here :D)
-    pick_from = ["Fire", "Water", "Earth", "Ground", "Mars", "Pluto", "Forest", "Rainbow Dash", "Frog", "9/11"]
-
-    to_calculate = []
-
-    for i in range(25):
-        to_calculate.append(random.sample(pick_from, 2))
-
-    proxy_1 = Proxy(ip="51.38.50.249", port=9224, protocol="socks5h")
-    proxy_2 = Proxy(ip="68.1.210.163", port=4145, protocol="socks5h")
-    proxy_3 = Proxy(ip="195.39.233.14", port=44567, protocol="socks5h")
-
-    proxy_3.submit(True, 0.01)
-    proxy_3.submit(True, 0.01)
-    proxy_3.submit(True, 0.01)
-    proxy_3.submit(True, 0.01)
-
-    proxy_2.grab(Worker([], [], proxy_2, "Johnson"))
-    proxy_3.grab(Worker([], [], proxy_2, "Johnson"))
-    w = Worker([proxy_1, proxy_2, proxy_3], to_calculate, proxy=proxy_1, worker_id="Tyler",
-               log_level=logging.DEBUG)
-
-    w.begin_working()
-    # w.kill = True
-    w.finish_working()
-    print(w.crafts)
-    print(w.proxy.average_response, w.proxy.total_submissions, w.proxy.total_successes, w.proxy.status,
-          w.proxy.disabled_until)

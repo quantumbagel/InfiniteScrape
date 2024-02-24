@@ -19,13 +19,18 @@ raw_proxies = get_proxies()
 o_value = []
 proxies: list[Proxy] = []
 ping_threads = []
+
+do_ping = True
+
+
 for i, p in enumerate(raw_proxies):
     px = Proxy(ip=p['ip'], port=p['port'], protocol=p['protocol'])
     proxies.append(px)
-    rvt = ReturnValueThread(target=ping, args=[px.parsed])
-    rvt.name = i
-    rvt.start()
-    ping_threads.append(rvt)
+    if do_ping:
+        rvt = ImprovedThread(target=ping, args=[px.parsed])
+        rvt.name = i
+        rvt.start()
+        ping_threads.append(rvt)
 
 for pt in ping_threads:
     pt.join()
@@ -40,8 +45,9 @@ for _ in range(4):
 
     s = Scheduler(to_calculate, proxies)
 
-    o = s.start()
-    print(o)
+    s.run()
+
+    o = parse_crafts_into_tree(s.output_crafts)
     o_value.append(o)
     for i in o.keys():
         if i.split("`")[0] not in pick_from and i.split('`')[0] != "Nothing":
