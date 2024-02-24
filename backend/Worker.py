@@ -104,7 +104,8 @@ class Worker:
             if not len(batch_crafts):  # It was empty from the start
                 return
 
-            self.logger.info(f"Now executing batch {batch_number} (Current exec time: {round(time.time() - s, 2)}s)")
+            self.logger.info(f"Now executing batch {batch_number} "
+                             f"(Current execution time: {round(time.time() - s, 2)}s)")
             batch_threads = []
             for index, current_craft in enumerate(batch_crafts):
                 self.logger.debug(f"Job {index + 1} of batch {batch_number} is starting with craft {current_craft}...")

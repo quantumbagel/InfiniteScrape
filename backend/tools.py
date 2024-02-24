@@ -95,7 +95,10 @@ def craft(one: str, two: str, proxy=None, timeout: int = 15, session: requests.S
         return {"status": "error", "type": "read"}  # Failure
     except urllib3.exceptions.ProtocolError:
         return {"status": "error", "type": "read"}  # :(
-
+    except requests.exceptions.ChunkedEncodingError:
+        return {"status": "error", "type": "read"}  # :(((
+    except requests.exceptions.RequestException:
+        return {"status": "error", "type": "read"}  # :((((((((((
     string_response: str = response.content.decode('utf-8')  # Format byte response
     if "Retry-After" in response.headers:
         return {"status": "error", "type": "ratelimit", "penalty": int(response.headers["Retry-After"])}
