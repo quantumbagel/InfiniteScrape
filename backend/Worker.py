@@ -193,6 +193,9 @@ class Worker:
                     else:  # Failed to connect to proxy
                         self.logger.debug(f"Failed to grab proxy {str(proxy)}")
 
+            if grabbed:  # Hotfix
+                break
+
             # We haven't found a proxy yet, just WAIT for NEW_PROXY_SLEEP seconds
             self.logger.error(
                 f"Unable to find available, functional proxy! Retrying in {NEW_PROXY_SLEEP} seconds...")

@@ -10,8 +10,8 @@ class Scheduler:
     def __init__(self, crafts: list[list[str, str] | tuple[str, str]], proxies: list[Proxy], name: str = "Default",
                  log_level: str = logging.INFO):
         """
-        Initalize a Scheduler.
-        :param crafts: the crafts that have to be completed
+        Initialize a Scheduler.
+        :param crafts: The crafts that have to be completed
         :param proxies: the proxies we can use to do the job
         :param name: The name of the Scheduler
         :param log_level: the log level of the internal logger

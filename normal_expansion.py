@@ -55,3 +55,5 @@ for _ in range(4):
 
     print(time.time()-t)
 
+
+pprint(o_value[3])
