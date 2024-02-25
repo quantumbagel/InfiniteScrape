@@ -4,7 +4,7 @@ from backend.Proxy import Proxy
 import itertools
 import time
 import datetime
-
+from pprint import pprint
 
 def ping(ip):
     prox = {"https": ip}
@@ -57,4 +57,4 @@ for _ in range(4):
     print(time.time()-t)
 
 
-pprint(o_value[3])
+#pprint(o_value[0])

@@ -24,7 +24,7 @@ READ_PENALTY = 60  # 1 minute if we can't read the data
 
 
 class Proxy:
-    def __init__(self, ip: str | None, port: str | int | None, protocol: str, log_level: int = logging.INFO):
+    def __init__(self, ip: str | None, port: str | int | None, protocol: str, log_level: int = logging.INFO) -> None:
         """
         Initialize the Proxy.
         :param ip: The IP address
@@ -74,7 +74,8 @@ class Proxy:
         self.logger = logging.getLogger(f"Proxy({self.parsed})")
         self.logger.setLevel(log_level)
 
-    def submit(self, success: bool, time_elapsed: float | int | None = 0, did_connect: bool = True, did_respond: bool = True, retry_after=0):
+    def submit(self, success: bool, time_elapsed: float | int | None = 0, did_connect: bool = True,
+               did_respond: bool = True, retry_after=0) -> None:
         """
         Update the stat metrics of this Proxy so it can be compared.
         :param success: Whether the request succeeded
@@ -116,7 +117,7 @@ class Proxy:
                 self.disabled_until = time.time() + CONNECTION_PENALTY  # Default penalty
         self.total_submissions += 1
 
-    def withdraw(self, w):
+    def withdraw(self, w) -> bool:
         """
         This function will be called by a Worker for it to disconnect
         :param w: The Worker that is trying to disconnect.
@@ -130,7 +131,7 @@ class Proxy:
         self.logger.debug(f"Worker {str(w)} was unable to withdraw (lock held by worker {self.worker})")
         return False
 
-    def grab(self, w):
+    def grab(self, w) -> bool:
         """
         This function will be called by a Worker for it to connect
         :param w: the Worker trying to connect
@@ -143,7 +144,7 @@ class Proxy:
         self.logger.debug(f"Worker {str(w)} was unable to connect (lock held by worker {self.worker})")
         return False
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         """
         Check if two Proxies are equal
         :param other: the other proxy
@@ -153,7 +154,7 @@ class Proxy:
             return True
         return False
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Represent this Proxy as a string.
         :return: the representation
@@ -163,7 +164,7 @@ class Proxy:
         else:
             return self.parsed
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Represent this proxy fully.
         :return: the representation

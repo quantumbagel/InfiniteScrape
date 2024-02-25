@@ -6,3 +6,9 @@ class InvalidProxyIP(Exception):
 
 class InvalidProxyPort(Exception):
     pass
+
+class InvalidMongoDBURI(Exception):
+    pass
+
+class MongoDBConnectionError(Exception):
+    pass

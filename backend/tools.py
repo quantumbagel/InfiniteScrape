@@ -7,6 +7,7 @@ import time
 
 import fake_useragent
 import js2py
+import pymongo
 import requests
 import urllib3.exceptions
 from bs4 import BeautifulSoup
@@ -14,7 +15,7 @@ from bs4 import BeautifulSoup
 ua = fake_useragent.UserAgent()
 
 
-def verify_ip(ip: str):
+def verify_ip(ip: str) -> bool:
     """
     Check if a given IP is valid
     :param ip:
@@ -27,7 +28,7 @@ def verify_ip(ip: str):
         return False
 
 
-def verify_port(port: str | int):
+def verify_port(port: str | int) -> bool:
     """
     Check if a port is valid.
     :param port:
@@ -39,7 +40,7 @@ def verify_port(port: str | int):
         return port.isnumeric()
 
 
-def craft(one: str, two: str, proxy=None, timeout: int = 15, session: requests.Session | None = None):
+def craft(one: str, two: str, proxy=None, timeout: int = 15, session: requests.Session | None = None) -> dict:
     """
     This function, using the proxy IP passed, will attempt to craft two elements together
     :param session:
@@ -70,7 +71,6 @@ def craft(one: str, two: str, proxy=None, timeout: int = 15, session: requests.S
         'second': two,
     }
 
-
     # Proxy
     proxy_argument = {"https": proxy.parsed}
 
@@ -80,7 +80,6 @@ def craft(one: str, two: str, proxy=None, timeout: int = 15, session: requests.S
             getter = requests
         else:
             getter = session
-
 
         response: requests.Response = getter.get('https://neal.fun/api/infinite-craft/pair', params=params,
                                                  headers=headers,
@@ -120,7 +119,7 @@ def score_proxy(p):
     :return: The score of the proxy
     """
 
-    salt = random.random()/5
+    salt = random.random() / 5
     if p.disabled_until > time.time():  # INVALID PROXY WOOT WOOT
         return -100 + salt
     if p.worker is not None:
@@ -164,7 +163,7 @@ class ImprovedThread(threading.Thread):
         super().__init__(*args, **kwargs)
         self.result = None
 
-    def run(self):
+    def run(self) -> None:
         """
         Run the ImprovedThread.
         :return:
@@ -188,7 +187,7 @@ class ImprovedThread(threading.Thread):
         return self.result
 
 
-def get_proxies():
+def get_proxies() -> list:
     """
     This function is really complex. Here's how it works:
 
@@ -206,7 +205,7 @@ def get_proxies():
     """
     proxies = []
     proxies_doc = (requests.get('https://spys.one/en/socks-proxy-list',
-                               headers={"User-Agent": ua.random, "Content-Type": "application/x-www-form-urlencoded"})
+                                headers={"User-Agent": ua.random, "Content-Type": "application/x-www-form-urlencoded"})
                    .text)
 
     # Get the parser
@@ -229,7 +228,6 @@ def get_proxies():
             prev_var = variables[var.split("^")[1]]
             variables[name] = int(value.split("^")[0]) ^ int(prev_var)  # Gotta love the bit math
 
-
     # Get each row of the giant table
     trs = tables[2].find_all("tr")[2:]
     for tr in trs:
@@ -242,7 +240,6 @@ def get_proxies():
         # I've blanked out the sheer amount of weirdness that happens here
         raw_port = [i.replace("(", "").replace(")", "") for i in
                     str(address.find("script")).replace("</script>", '').split("+")[1:]]
-
 
         # Calculate the prot
         port = ""
@@ -259,7 +256,7 @@ def get_proxies():
     return proxies
 
 
-def parse_crafts_into_tree(raw_crafts):
+def parse_crafts_into_tree(raw_crafts) -> dict:
     """
     Parse raw crafts into a craft tree.
     :param raw_crafts: the input crafts
@@ -278,3 +275,66 @@ def parse_crafts_into_tree(raw_crafts):
             if input_craft not in out[key] and [input_craft[1], input_craft[0]] not in out[key]:
                 out[key].append(input_craft)
     return out
+
+
+def add_raw_craft_to_db(raw_craft: list[list[str, str], dict], db: pymongo.MongoClient) -> None:
+    """
+    Add a raw craft to the database.
+    :param raw_craft: The raw craft to add
+    :param db: the MongoClient to add to
+    :return: None
+    """
+    is_recursive = raw_craft[0][0] == raw_craft[1]["result"] or raw_craft[0][1] == raw_craft[1]["result"]
+    new_document_crafted_by = {"type": "crafted_by", "craft": raw_craft[0], "recursive": is_recursive}
+    new_document_crafts_1 = {"type": "crafts", "craft": raw_craft[1]["result"], "with": raw_craft[0][0],
+                             "recursive": is_recursive}
+    new_document_crafts_2 = {"type": "crafts", "craft": raw_craft[1]["result"], "with": raw_craft[0][1],
+                             "recursive": is_recursive}
+    craft_item_two_collection = db["crafts"].get_collection(raw_craft[0][1])
+    craft_item_one_collection = db["crafts"].get_collection(raw_craft[0][0])
+    craft_result_collection = db["crafts"].get_collection(raw_craft[1]["result"])
+    if new_document_crafts_1["with"] == new_document_crafts_2["with"]:  # double recipe (Water + Water)
+        if craft_item_two_collection.find_one(new_document_crafts_1) is None:
+            craft_item_two_collection.insert_one(new_document_crafts_1)
+    else:
+        if craft_item_two_collection.find_one(new_document_crafts_1) is None:
+            craft_item_two_collection.insert_one(new_document_crafts_1)
+        if craft_item_one_collection.find_one(new_document_crafts_2) is None:
+            craft_item_one_collection.insert_one(new_document_crafts_2)
+
+    if craft_result_collection.find_one(new_document_crafted_by) is None:
+        craft_result_collection.insert_one(new_document_crafted_by)
+    if craft_result_collection.find_one({"type": "info"}) is None:
+        new_document_data = {"type": "info",
+                             "emoji": raw_craft[1]["emoji"],
+                             "discovered": raw_craft[1]["isNew"]}
+        if craft_result_collection.find_one(new_document_data) is None:
+            craft_result_collection.insert_one(new_document_data)
+
+
+def check_craft_exists_db(craft_data: list[str, str] | tuple[str | str], db: pymongo.MongoClient, return_craft_data=False):
+    """
+    Check if the craft exists in the database. Return the craft's output and emoji if return_craft_data is set
+    :param craft_data: The raw craft. Just the two ingredients
+    :param db: the database client
+    :param return_craft_data: whether to return the raw craft data
+    :return: False if the craft doesn't exist, and either True or the craft data depending on return_craft_data
+    """
+    if db is None:
+        return False  # no database, doesn't exist
+
+    craft_db = db["crafts"].get_collection(craft_data[0]).find_one({"type": "crafts", "with": craft_data[1]})
+    if not return_craft_data or craft_db is None:   # If we don't need to send the craft or we can't, return
+        return craft_db is not None
+    else:  # We are sending the craft data
+        this_item_crafts = craft_db["craft"]
+        info = db["crafts"].get_collection(this_item_crafts).find_one({"type": "info"})  # Try to get the info
+        if info is not None:  # Just in case (this should never not happen)
+            emoji = info["emoji"]
+            is_discovered = info["discovered"]
+        else:
+            emoji = ""
+            is_discovered = ""
+
+        return {"result": this_item_crafts, "emoji": emoji, "isNew": is_discovered}  # Return the packaged craft
+

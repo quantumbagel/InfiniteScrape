@@ -1,6 +1,7 @@
 import collections
 import logging
 import warnings
+
 from backend.Proxy import Proxy
 from backend.tools import *
 
@@ -25,7 +26,8 @@ class Worker:
     """
 
     def __init__(self, all_proxies: list, all_crafts: collections.deque, proxy: Proxy, worker_id: str | int,
-                 log_level=logging.INFO, return_craft_reference: list = None):
+                 log_level=logging.INFO, return_craft_reference: list = None, db: pymongo.MongoClient = None,
+                 batch_size: int = 5) -> None:
         """
         Initialize the Worker.
         :param all_proxies: the list of all the available proxies
@@ -48,10 +50,12 @@ class Worker:
         self.logger = logging.getLogger(f"Worker({self.id})")
         self.logger.setLevel(log_level)
         self.crafts = return_craft_reference
-        self.batch_size = 5  # The maximum number of jobs to concurrently send.
+        self.batch_size = batch_size  # The maximum number of jobs to concurrently send.
         self.completed = 0  # Keep track of completed jobs
+        self.db = db
+        self.skipped = 0  # Keep track of skipped jobs
 
-    def begin_working(self):
+    def begin_working(self) -> None:
         """
         Start the Worker
         :return: None
@@ -59,7 +63,7 @@ class Worker:
         self.thread = ImprovedThread(target=Worker.run, args=[self])
         self.thread.start()
 
-    def finish_working(self):
+    def finish_working(self) -> bool:
         """
         Wait for the Worker to finish. Currently unused
         :return: False if the Worker isn't running and True if the Worker was running, but finished
@@ -69,25 +73,29 @@ class Worker:
         self.thread.join()
         return True
 
-    def is_working(self):
+    def is_working(self) -> bool:
         """
         Check if the Worker is still alive.
         :return: Whether the Worker is running.
         """
         return self.thread.is_alive()
 
-    def run(self):
+    def run(self) -> None:
         """
         Run the Worker.
         :return: None
         """
+        self.completed = 0
+        self.skipped = 0
+        self.kill = False
+
         s = time.time()
-        grab_attempt = self.proxy.grab(self) 
+        grab_attempt = self.proxy.grab(self)
         if not grab_attempt:  # If we can't get a proxy, this worker can quit (too many workers relative to proxies)
             return
-        
+
         batch_number = 1  # The current batch number
-        
+
         # Main loop
         while len(self.all_crafts) > 0:
             batch_start = time.time()
@@ -109,14 +117,26 @@ class Worker:
             batch_threads = []
             for index, current_craft in enumerate(batch_crafts):
                 self.logger.debug(f"Job {index + 1} of batch {batch_number} is starting with craft {current_craft}...")
-                
+
+                # Check if we can be lazy and skip the craft.
+                #  (this function works even if there is no database so don't worry future me)
+                check = check_craft_exists_db(current_craft, self.db, return_craft_data=True)
+                if check is not False:
+                    self.logger.debug(f"Skipping job {index + 1} of batch {batch_number}"
+
+                                      f" because data is already present in database.")
+                    self.skipped += 1
+                    self.crafts.append([current_craft, check])
+                    continue
+
                 # Start the craft worker
+
                 t = ImprovedThread(target=craft,
-                                      args=[current_craft[0], current_craft[1], self.proxy, 10, self.session],
-                                      name=f"{self.id}-Job{index+1}")
-                t.start() 
+                                   args=[current_craft[0], current_craft[1], self.proxy, 10, self.session],
+                                   name=f"{self.id}-Job{index + 1}")
+                t.start()
                 batch_threads.append(t)
-            
+
             need_new_proxy = False
             failed_crafts = []  # The crafts that didn't work
             for index, thread in enumerate(batch_threads):
@@ -126,6 +146,8 @@ class Worker:
                 self.logger.debug(f"Job {index + 1} of batch {batch_number} returned value: {result}")
                 if result["status"] == "success":
                     self.crafts.append([batch_crafts[index], result])  # Save the craft
+                    if self.db is not None:  # If DB is enabled
+                        add_raw_craft_to_db([batch_crafts[index], result], self.db)  # Save to DB
                     self.completed += 1  # Increment the completed metric
                     self.proxy.submit(True, result["time_elapsed"])
                 # Submit metrics to the Proxy object
@@ -141,7 +163,7 @@ class Worker:
                     # Add the craft to failed_crafts if it failed
                     failed_crafts.append(batch_crafts[index])
                     need_new_proxy = True  # We have to find a new proxy 
-            
+
             # Check for failed crafts
             if need_new_proxy:  # One (or more) crafts failed, and we have a new proxy
                 self.logger.warning(f"{len(failed_crafts)}/{len(batch_crafts)} of batch"
@@ -165,10 +187,10 @@ class Worker:
 
             batch_number += 1  # Forgot to put this :(
 
-        self.logger.info(f"Finished processing of {self.completed} jobs.")
+        self.logger.info(f"Finished processing of {self.completed} jobs. ({self.skipped} skipped)")
         self.proxy.withdraw(self)  # Give our proxy back
 
-    def find_new_proxy(self):
+    def find_new_proxy(self) -> None:
         """
         Find a new proxy. This function will run until it finds a new proxy that
 
@@ -204,16 +226,17 @@ class Worker:
                 f"Unable to find available, functional proxy! Retrying in {NEW_PROXY_SLEEP} seconds...")
             time.sleep(NEW_PROXY_SLEEP)  # Keep on fruiting for a proxy ig
 
-    def __str__(self):
+    def __str__(self) -> str:
         """
         Represent the Worker as a string
         :return:
         """
         return self.id
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """
         Represent the Worker.
         :return:
         """
-        return f"Worker({self.id})"
+        return (f"Worker({self.id}): proxy: {self.proxy}, completed: {self.completed} skipped: {self.skipped},"
+                f" running: {self.is_working()}, batch_size: {self.batch_size}")
